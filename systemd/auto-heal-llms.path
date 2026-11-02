@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch LiteLLM Quarantine for Instant Auto-Healing
+Documentation=file:///home/michiel/ai/SETUP.md
+
+[Path]
+PathModified=%h/.config/litellm/state/quarantined_models.json
+Unit=auto-heal-llms.service
+
+[Install]
+WantedBy=default.target

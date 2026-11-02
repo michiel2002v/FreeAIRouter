@@ -1,0 +1,35 @@
+services:
+  free-llm-router:
+    container_name: free-llm-router
+    image: ghcr.io/berriai/litellm:main-latest
+    restart: unless-stopped
+    ports:
+      - "5111:4000"
+    volumes:
+      - ./config/config.yaml:/app/config.yaml:ro
+      - ./config/clean_request.py:/app/clean_request.py:ro
+      - ./state:/app/state:rw
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GROQ_API_KEY
+      - MISTRAL_API_KEY
+      - GEMINI_API_KEY
+      - NVIDIA_API_KEY
+      - OPENROUTER_API_KEY
+      - COHERE_API_KEY
+      - ZAI_API_KEY
+      - KILO_API_KEY
+      - GONKA_API_KEY
+      - AION_API_KEY
+      - REQUESTY_API_KEY
+      - CF_API_TOKEN
+      - CF_ACCOUNT_ID
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/readiness\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

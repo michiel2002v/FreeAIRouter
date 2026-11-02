@@ -1,0 +1,11 @@
+[Unit]
+Description=Auto-Heal Free LLM Router & OpenCode Models
+Documentation=file:///home/michiel/ai/SETUP.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/michiel/.local/bin:/home/michiel/.opencode/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/michiel/.local/bin/auto-heal-llms.py
+StandardOutput=journal
+StandardError=journal

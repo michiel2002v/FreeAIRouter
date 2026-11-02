@@ -1,0 +1,165 @@
+# GEMINI.md — Free LLM Router & OpenCode Agent Manual
+
+> **Workspace**: `/home/michiel/ai`  
+> **Primary Components**: OpenCode CLI (v2.2.2) + LiteLLM Docker Compose Router (:5111)  
+> **Virtual Model**: `auto-free/free-coder` (aliased to `free-coder`)
+
+---
+
+## 1. System Architecture
+
+This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 18 free-tier LLM deployments with latency-based load balancing, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and context window compaction.
+
+```mermaid
+flowchart TD
+    User["Developer / Agent"] -->|opencode| OC["OpenCode CLI"]
+    OC -->|Default: 'auto-free/free-coder'| LiteLLM["LiteLLM Router (Docker :5111)"]
+
+    subgraph RouterCore ["Router Intelligence & Safety Layer"]
+        LiteLLM --> Compactor["Context Compactor (In-Flight Summarizer)"]
+        Compactor --> Clamper["Output Token Clamper (4096 / 16K safety)"]
+        Clamper --> Balancer["Latency-Based Load Balancer + 60s Cooldown"]
+    end
+
+    subgraph Deployments ["18-Deployment Failover Pool"]
+        Balancer --> Frontier["Tier 1: Frontier Models (Nemotron 550B, Gemini 3.8 Flash, Codestral, Llama 3.3 70B, GPT-OSS 120B)"]
+        Balancer --> Coding["Tier 2: Dedicated Coding & Math (Command R+, Groq Qwen 27B, Nemotron Lightning, North Mini Code)"]
+        Balancer --> Fallbacks["Tier 3: Resilient Fallbacks (Gemini 3.5 Flash/Lite, DeepSeek V4, Kilo, NVIDIA NIM, OpenRouter Free)"]
+    end
+```
+
+---
+
+## 2. Active Free Model Roster (Ranked by Intelligence)
+
+All models are accessed via free-tier keys loaded from `~/notepad/free-llms/.env`. The router automatically picks the fastest healthy candidate:
+
+| # | Provider | Model ID | Intelligence & Context Strengths |
+| :-: | :--- | :--- | :--- |
+| **1** | **Mistral AI** | `mistral/codestral-latest` | Premier 256K dedicated code model; Fill-In-The-Middle (FIM) & SOTA code benchmarks |
+| **2** | **Google Gemini** | `gemini/gemini-3.8-flash` | Frontier multimodal reasoning with 1,000,000+ token context window |
+| **3** | **OpenRouter** | `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` | **550 Billion parameter** ultra reasoning frontier model; 1,000,000 context |
+| **4** | **Groq** | `groq/openai/gpt-oss-120b` | 120B parameter reasoning model running at ultra-low latency (~200ms on Groq LPUs) |
+| **5** | **Cloudflare** | `openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 70B parameter frontier open-weights model; 128K context (~500ms via Workers AI) |
+| **6** | **Cohere** | `openai/command-r-plus-08-2024` | 104B parameter frontier Command R+ tool model; 128K context (clamped to 4096 output) |
+| **7** | **Groq** | `groq/qwen/qwen3.8-27b` | Top-tier algorithmic coding and math reasoning (clamped to 16K output) |
+| **8** | **OpenRouter** | `openrouter/nvidia/nemotron-3.5-lightning:free` | 1,000,000 context fast reasoning model |
+| **9** | **OpenRouter** | `openrouter/cohere/north-mini-code:free` | Dedicated 256K context free coding model with reasoning support |
+| **10** | **Kilo Code** | `openai/kilo-auto/free` | Reflection Beam & community free coding models |
+| **11** | **Gonka Broker**| `openai/deepseek-ai/DeepSeek-V4-Flash-0731` | 400K context DeepSeek V4 reasoning (~170ms) |
+| **12** | **Google Gemini** | `gemini/gemini-3.5-flash` | Secondary 1,000,000 context frontier fallback |
+| **13** | **Google Gemini** | `gemini/gemini-3.5-flash-lite` | Tertiary high-availability context fallback |
+| **14** | **NVIDIA NIM** | `openai/openai/gpt-oss-20b` | Reliable low-latency reasoning fallback |
+| **15** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
+| **16** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
+| **17** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model |
+| **18** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
+
+---
+
+## 3. Dynamic Output Token Clamping
+
+### Problem
+Coding agents (including OpenCode) default to sending `max_tokens: 32000` (or `max_completion_tokens: 32000`). Strict providers like Cohere enforce a hard output ceiling of 4096 tokens, failing with `400 BadRequestError: max tokens must be less than or equal to 4096`.
+
+### Solution
+In [`~/.config/litellm/clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py), `async_pre_call_deployment_hook` inspects each deployment right before sending the request:
+- If a target model has an output ceiling (e.g., 4096 for Cohere, 16384 for Groq Qwen), `max_tokens` is transparently clamped.
+- Frontier models with large output capacities (Gemini Flash, Codestral) retain their full 32K+ generation capacity.
+- The failure hook dynamically learns and caches output limits from any unrecognized provider errors at runtime.
+
+---
+
+## 4. Autonomous Context Compactor & Summarization Engine
+
+### 1. In-Flight Autonomous Compactor (`clean_request.py`)
+- Automatically engages in `async_pre_call_hook` when conversation history exceeds **90,000 characters** (~22,500 tokens).
+- **Lossless Priority**:
+  - Strictly preserves **System Instructions** (`messages[0]`).
+  - Strictly preserves the **most recent 4 conversation turns** (active user prompt and immediate code context).
+  - Summarizes and condenses older middle turns and bulky command outputs into a structured executive markdown summary block:
+    ```markdown
+    ### [AUTOMATED CONTEXT COMPACTION SUMMARY]
+    - USER: Requested LiteLLM setup and Docker configuration...
+    - ASSISTANT: Initialized docker-compose, verified ports...
+    ### [END CONTEXT COMPACTION SUMMARY]
+    ```
+- Model-specific safety: Clamps input context further if a specific selected deployment has an input limit smaller than the payload.
+- Configured with `ContextWindowExceededErrorRetries: 3` in `retry_policy`.
+
+### 2. Standalone Summarization CLI (`free-ai summarize`)
+For compacting files, transcripts, or long logs on demand:
+```bash
+# Summarize a file or transcript
+free-ai summarize path/to/large_transcript.txt
+
+# Summarize from stdin pipe
+cat debug.log | free-ai summarize
+
+# Save directly to a summary markdown file
+free-ai summarize --save context_summary.md < transcript.txt
+```
+Powered by [`~/.local/bin/summarize-context.py`](file:///home/michiel/.local/bin/summarize-context.py), routed through the fastest available frontier model in ~2 seconds.
+
+---
+
+## 5. Strict Message Sanitization (Thinking & Reasoning Blocks)
+
+### Problem
+When prior turns were generated by reasoning models (DeepSeek, Nemotron, Kilo Code, Groq Qwen), assistant responses contain vendor-specific keys like `reasoning_content`, `reasoning_details`, or `provider_specific_fields`. When retransmitted in conversation history, strict non-reasoning providers fail:
+- **Cohere Command R+**: `400 BadRequestError: thinking content is not allowed in chat history for non-reasoning models.`
+- **Mistral Codestral**: `422 Unprocessable Entity: extra_forbidden: Extra inputs are not permitted at assistant.reasoning_details.`
+
+### Solution
+In [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py), `clean_chat_message` sanitizes every message right before transmission (both in pre-call hook and in deployment hook):
+- Enforces strict OpenAI schema (`role`, `content`, `name`, `tool_calls`, `tool_call_id`).
+- Strips `reasoning_content`, `reasoning_details`, `thinking`, `thought`, and `provider_specific_fields`.
+- Rescues reasoning text into `content` if `content` was empty so no context is ever lost.
+- Router timeout is set to 60s to prevent premature read timeouts on heavy fallback payloads.
+
+---
+
+## 6. Autonomous 24/7 Self-Healing Watchdog
+
+When upstream providers retire or alter free models (e.g. HTTP 404):
+1. **Tier 1 (Instant In-Flight Failover)**: `NotFoundErrorRetries: 3` ensures the active OpenCode prompt switches to another model in milliseconds without crashing.
+2. **Tier 2 (Real-Time In-Memory Quarantine)**: `clean_request.py` quarantines defunct models in `~/.config/litellm/state/quarantined_models.json` and excludes them from future routing.
+3. **Tier 3 (Catalog Reconciler & Systemd Watchdog)**:
+   - Systemd user path unit `auto-heal-llms.path` triggers instantly upon quarantine modification.
+   - Systemd user timer `auto-heal-llms.timer` runs every 30 minutes to check provider catalogs.
+   - Script [`~/.local/bin/auto-heal-llms.py`](file:///home/michiel/.local/bin/auto-heal-llms.py) queries provider APIs, selects the highest-ranking replacement, updates `config.yaml` and `opencode.json`, and reloads the stack automatically.
+
+---
+
+## 7. Multi-User Architecture & System-Wide Sharing
+
+OpenCode and `free-ai` are configured for multi-user access across all accounts on this Ubuntu system:
+- **Centralized Proxy**: The LiteLLM Docker container (`free-llm-router`) listens on port `5111` (`127.0.0.1:5111`), allowing any local user to utilize the 18 free-tier LLM failover pool without exposing raw provider API keys.
+- **Independent Daemon Ports**: OpenCode launches a background service per user. To prevent daemon port collisions (default `49374`), ports are deterministically partitioned by UID (`48000 + UID`) in `~/.config/opencode/service.json` (e.g. `michiel`: 49374/49000, `pennytree-dev`: 49375, `sprintforge-dev`: 49376).
+- **Installed Accounts**: `pennytree-dev` and `sprintforge-dev` have `opencode`, `free-ai`, and `summarize-context.py` ready in their `$HOME/.local/bin` and configured with `~/.config/opencode/opencode.json`.
+- **System-Wide Installer**: Running `sudo /home/michiel/ai/install-systemwide.sh` installs the launcher to `/usr/local/bin/opencode` (with automatic UID port allocation), `/usr/local/bin/free-ai`, `/etc/opencode/opencode.json` (global config), and `/etc/profile.d/free-ai.sh` for universal availability across all present and future users.
+
+---
+
+## 8. Essential Commands Reference
+
+| Command | Action |
+| :--- | :--- |
+| `opencode` | Launch interactive OpenCode TUI with auto-failover |
+| `free-ai status` | Show status of OpenCode, LiteLLM container, and provider keys |
+| `free-ai test` | Run live completion tests across all configured providers |
+| `free-ai last` | Show the exact upstream model that handled your last prompt |
+| `free-ai watch` | Stream real-time routing decisions as you code |
+| `free-ai summarize <file>` | Generate an executive technical summary using a frontier model |
+| `free-ai auto-heal` | Manually run the self-healing watchdog and inspect logs |
+| `free-ai router restart` | Restart the Docker Compose router stack |
+| `free-ai router logs` | Tail recent LiteLLM Docker container logs |
+
+---
+
+## 9. Guidelines for AI Agents Working Here
+
+1. **Environment Secrets**: Never commit or expose `~/notepad/free-llms/.env`. Use `os.environ` or Docker Compose environment mapping.
+2. **Keep Documentation in Sync**: When modifying models, routes, or hooks, update [`SETUP.md`](file:///home/michiel/ai/SETUP.md), [`GEMINI.md`](file:///home/michiel/ai/GEMINI.md), and [~/.config/opencode/opencode.json](file:///home/michiel/.config/opencode/opencode.json).
+3. **Verify After Changes**: After updating router configuration or Python hooks, execute `free-ai router restart` followed by a live test completion.
+4. **Preserve Clamping & Compaction**: Maintain the pre-call deployment hooks in [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py) so downstream coding tools never trigger 400 token overflows or context blowups.

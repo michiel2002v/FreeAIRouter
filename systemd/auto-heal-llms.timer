@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Proactive Auto-Heal for Free LLM Models
+Documentation=file:///home/michiel/ai/SETUP.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=auto-heal-llms.service
+
+[Install]
+WantedBy=timers.target

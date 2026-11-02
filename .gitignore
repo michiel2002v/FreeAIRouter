@@ -1,0 +1,30 @@
+# Private API keys and local configuration
+.env
+*.env.local
+*.env
+!/.env.example
+
+# Runtime state and logs
+state/*.json
+state/*.txt
+!state/.gitkeep
+*.log
+auto-heal.log
+
+# Python virtualenvs & byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Node modules
+node_modules/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Submodules or cloned catalogs
+awesome-free-llm-apis/
