@@ -32,28 +32,29 @@ flowchart TD
 
 ## 2. Active Free Model Roster (Ranked by Intelligence)
 
-All models are accessed via free-tier keys loaded from `~/notepad/free-llms/.env`. The router automatically picks the fastest healthy candidate:
+All models are accessed via free-tier keys loaded from `~/notepad/free-llms/.env`. The router automatically picks the fastest healthy candidate from models with ample context windows (32K to 1M+):
 
 | # | Provider | Model ID | Intelligence & Context Strengths |
 | :-: | :--- | :--- | :--- |
 | **1** | **Mistral AI** | `mistral/codestral-latest` | Premier 256K dedicated code model; Fill-In-The-Middle (FIM) & SOTA code benchmarks |
 | **2** | **Google Gemini** | `gemini/gemini-3.8-flash` | Frontier multimodal reasoning with 1,000,000+ token context window |
 | **3** | **OpenRouter** | `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` | **550 Billion parameter** ultra reasoning frontier model; 1,000,000 context |
-| **4** | **Groq** | `groq/openai/gpt-oss-120b` | 120B parameter reasoning model running at ultra-low latency (~200ms on Groq LPUs) |
+| **4** | **Groq** | `groq/openai/gpt-oss-120b` | 120B parameter reasoning model running at ultra-low latency (~200ms on Groq LPUs; 128K context) |
 | **5** | **Cloudflare** | `openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 70B parameter frontier open-weights model; 128K context (~500ms via Workers AI) |
 | **6** | **Cohere** | `openai/command-r-plus-08-2024` | 104B parameter frontier Command R+ tool model; 128K context (clamped to 4096 output) |
-| **7** | **Groq** | `groq/qwen/qwen3.8-27b` | Top-tier algorithmic coding and math reasoning (clamped to 16K output) |
+| **7** | **Groq** | `groq/qwen/qwen3.8-27b` | Top-tier algorithmic coding and math reasoning (clamped to 16K output; dynamic bypass on >22K chars due to 7K TPM limit) |
 | **8** | **OpenRouter** | `openrouter/nvidia/nemotron-3.5-lightning:free` | 1,000,000 context fast reasoning model |
 | **9** | **OpenRouter** | `openrouter/cohere/north-mini-code:free` | Dedicated 256K context free coding model with reasoning support |
-| **10** | **Kilo Code** | `openai/kilo-auto/free` | Reflection Beam & community free coding models |
+| **10** | **Kilo Code** | `openai/kilo-auto/free` | Reflection Beam & community free coding models (32K context) |
 | **11** | **Gonka Broker**| `openai/deepseek-ai/DeepSeek-V4-Flash-0731` | 400K context DeepSeek V4 reasoning (~170ms) |
 | **12** | **Google Gemini** | `gemini/gemini-3.5-flash` | Secondary 1,000,000 context frontier fallback |
 | **13** | **Google Gemini** | `gemini/gemini-3.5-flash-lite` | Tertiary high-availability context fallback |
-| **14** | **NVIDIA NIM** | `openai/openai/gpt-oss-20b` | Reliable low-latency reasoning fallback |
-| **15** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
-| **16** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
-| **17** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model |
-| **18** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
+| **14** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
+| **15** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
+| **16** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model (32K context) |
+| **17** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
+
+*(Note: 8K-context models like NVIDIA NIM `gpt-oss-20b` are excluded from the main coding pool to ensure agents never hit premature context ceilings).*
 
 ---
 
@@ -70,13 +71,13 @@ In [`~/.config/litellm/clean_request.py`](file:///home/michiel/.config/litellm/c
 
 ---
 
-## 4. Autonomous Context Compactor & Summarization Engine
+## 4. Autonomous Context Compactor & Dynamic Headroom Routing
 
 ### 1. In-Flight Autonomous Compactor (`clean_request.py`)
-- Automatically engages in `async_pre_call_hook` when conversation history exceeds **90,000 characters** (~22,500 tokens).
+- Automatically engages in `async_pre_call_hook` when conversation history exceeds **180,000 characters** (~45,000 tokens).
 - **Lossless Priority**:
   - Strictly preserves **System Instructions** (`messages[0]`).
-  - Strictly preserves the **most recent 4 conversation turns** (active user prompt and immediate code context).
+  - Slices cleanly at **User Turn boundaries** so assistant tool-call / tool-response pairs are never severed or broken.
   - Summarizes and condenses older middle turns and bulky command outputs into a structured executive markdown summary block:
     ```markdown
     ### [AUTOMATED CONTEXT COMPACTION SUMMARY]
@@ -84,7 +85,10 @@ In [`~/.config/litellm/clean_request.py`](file:///home/michiel/.config/litellm/c
     - ASSISTANT: Initialized docker-compose, verified ports...
     ### [END CONTEXT COMPACTION SUMMARY]
     ```
-- Model-specific safety: Clamps input context further if a specific selected deployment has an input limit smaller than the payload.
+- **Context-Aware Headroom Routing**:
+  - Automatically bypasses models with low rate-limits or small context as conversation grows:
+    - >22,000 chars: Excludes `groq/qwen/qwen3.8-27b` (protecting against Groq's 7,000 TPM limit).
+    - >100,000 chars: Excludes 32K/65K models (`kilo-auto`, `pennytree`, `north-mini-code`), routing exclusively to 128K-1M frontier giants (Codestral 256K, Gemini 1M, Nemotron 1M, DeepSeek 400K, Llama 3.3 128K, GPT-OSS 120B 128K).
 - Configured with `ContextWindowExceededErrorRetries: 3` in `retry_policy`.
 
 ### 2. Standalone Summarization CLI (`free-ai summarize`)
@@ -103,18 +107,19 @@ Powered by [`~/.local/bin/summarize-context.py`](file:///home/michiel/.local/bin
 
 ---
 
-## 5. Strict Message Sanitization (Thinking & Reasoning Blocks)
+## 5. Strict Message Sanitization & Tool Call Integrity Guard
 
 ### Problem
-When prior turns were generated by reasoning models (DeepSeek, Nemotron, Kilo Code, Groq Qwen), assistant responses contain vendor-specific keys like `reasoning_content`, `reasoning_details`, or `provider_specific_fields`. When retransmitted in conversation history, strict non-reasoning providers fail:
-- **Cohere Command R+**: `400 BadRequestError: thinking content is not allowed in chat history for non-reasoning models.`
-- **Mistral Codestral**: `422 Unprocessable Entity: extra_forbidden: Extra inputs are not permitted at assistant.reasoning_details.`
+1. When prior turns were generated by reasoning models (DeepSeek, Nemotron, Kilo Code, Groq Qwen), assistant responses contain vendor-specific keys like `reasoning_content`, `reasoning_details`, or `provider_specific_fields`. When retransmitted in conversation history, strict non-reasoning providers fail (`400/422`).
+2. If internal thoughts (e.g. "I cannot run audio processing in this environment") leak into the conversation history, subsequent models inherit that negative bias and refuse tool execution.
+3. If conversation history is compacted or sliced midway through a tool execution turn, orphaned `role: tool` messages break strict OpenAI, Mistral, and Gemini schemas with:
+   - `400 BadRequestError: Unexpected tool call id ... in tool results`
+   - `Missing corresponding tool call for tool response message`
 
 ### Solution
-In [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py), `clean_chat_message` sanitizes every message right before transmission (both in pre-call hook and in deployment hook):
-- Enforces strict OpenAI schema (`role`, `content`, `name`, `tool_calls`, `tool_call_id`).
-- Strips `reasoning_content`, `reasoning_details`, `thinking`, `thought`, and `provider_specific_fields`.
-- Rescues reasoning text into `content` if `content` was empty so no context is ever lost.
+In [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py):
+- `clean_chat_message`: Sanitizes every message to strict OpenAI schema, stripping non-standard reasoning blocks and rescuing thought text into `content` **only** if the message would otherwise be completely empty.
+- `validate_and_repair_tool_history`: Enforces strict OpenAI tool-call ordering. Safely converts any orphaned `tool` results into user messages, and ensures every assistant `tool_calls` has its required responses.
 - Router timeout is set to 60s to prevent premature read timeouts on heavy fallback payloads.
 
 ---

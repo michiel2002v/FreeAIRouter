@@ -98,11 +98,10 @@ The router defaults to `latency-based-routing` across the healthy members of thi
 | **11** | **Gonka Broker**| `openai/deepseek-ai/DeepSeek-V4-Flash-0731` | 400K context DeepSeek V4 reasoning (~170ms) |
 | **12** | **Google Gemini** | `gemini/gemini-3.5-flash` | Secondary 1,000,000 context frontier fallback |
 | **13** | **Google Gemini** | `gemini/gemini-3.5-flash-lite` | Tertiary high-availability context fallback |
-| **14** | **NVIDIA NIM** | `openai/openai/gpt-oss-20b` | Reliable low-latency reasoning fallback |
-| **15** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
-| **16** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
-| **17** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model |
-| **18** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
+| **14** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
+| **15** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
+| **16** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model (32K context) |
+| **17** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
 
 ---
 

@@ -199,11 +199,10 @@ The models were chosen and verified based on their coding benchmark rankings and
 | **11** | **Gonka Broker** | `deepseek-ai/DeepSeek-V4-Flash-0731` | 400K context DeepSeek V4 reasoning at ~200ms latency |
 | **12** | **Google Gemini** | `gemini-3.5-flash` | Secondary 1M context fallback |
 | **13** | **Google Gemini** | `gemini-3.5-flash-lite` | Tertiary high-availability context fallback |
-| **14** | **NVIDIA NIM** | `openai/gpt-oss-20b` | Reliable low-latency reasoning fallback |
-| **15** | **Aion Labs** | `aion-labs/aion-2.0` | 128K context reasoning |
-| **16** | **Zhipu AI** | `glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
-| **17** | **Requesty** | `policy/pennytree-free` | 0-cost free tier reasoning model |
-| **18** | **OpenRouter** | `openrouter/free` | Community free dynamic router fallback |
+| **14** | **Aion Labs** | `aion-labs/aion-2.0` | 128K context reasoning |
+| **15** | **Zhipu AI** | `glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
+| **16** | **Requesty** | `policy/pennytree-free` | 0-cost free tier reasoning model (32K context) |
+| **17** | **OpenRouter** | `openrouter/free` | Community free dynamic router fallback |
 
 ---
 

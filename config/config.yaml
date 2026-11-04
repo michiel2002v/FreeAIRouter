@@ -72,14 +72,7 @@ model_list:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
 
-  # 11. NVIDIA NIM GPT-OSS 20B - Reliable low-latency reasoning
-  - model_name: free-coder
-    litellm_params:
-      model: openai/openai/gpt-oss-20b
-      api_base: https://integrate.api.nvidia.com/v1
-      api_key: os.environ/NVIDIA_API_KEY
-
-  # 12. Aion Labs - 128K context reasoning
+  # 11. Aion Labs - 128K context reasoning
   - model_name: free-coder
     litellm_params:
       model: openai/aion-labs/aion-2.0

@@ -54,7 +54,7 @@ KNOWN_MODEL_OUTPUT_LIMITS: dict[str, int] = {
 DYNAMIC_MODEL_LIMITS: dict[str, int] = {}
 
 # Context Compaction Thresholds
-COMPACTION_CHAR_THRESHOLD = 90_000  # ~22,500 tokens; safely under 32k/64k model limits
+COMPACTION_CHAR_THRESHOLD = 180_000  # ~45,000 tokens; safely accommodated by 128K-1M frontier models
 MAX_TOOL_OUTPUT_CHARS = 1000       # Historical tool outputs truncated to preserve context
 
 # Standard permitted keys in OpenAI ChatCompletion messages
@@ -87,6 +87,7 @@ def clean_chat_message(msg: dict) -> dict:
     # Normalize content
     if isinstance(content, list):
         text_parts = []
+        thought_parts = []
         has_multimodal = False
         for part in content:
             if isinstance(part, dict):
@@ -96,7 +97,7 @@ def clean_chat_message(msg: dict) -> dict:
                 elif p_type in ("thinking", "reasoning"):
                     thought = part.get("thinking") or part.get("text") or part.get("reasoning") or ""
                     if thought:
-                        text_parts.append(f"[Thought: {thought}]")
+                        thought_parts.append(thought)
                 elif "text" in part:
                     text_parts.append(part["text"])
                 elif "image_url" in part:
@@ -106,12 +107,23 @@ def clean_chat_message(msg: dict) -> dict:
 
         if not has_multimodal:
             joined = "\n".join(filter(None, text_parts)).strip()
+            # Only rescue thought if there is NO text output at all
+            if not joined and thought_parts:
+                joined = "\n".join(thought_parts).strip()
             clean["content"] = joined if joined else " "
         else:
             clean_list = []
+            has_valid_text = any(
+                isinstance(p, dict) and p.get("type") == "text" and bool(p.get("text", "").strip())
+                for p in content
+            )
             for part in content:
                 if isinstance(part, dict) and part.get("type") in ("thinking", "reasoning"):
-                    clean_list.append({"type": "text", "text": f"[Thought: {part.get('thinking') or part.get('reasoning') or ''}]"})
+                    # Only rescue thought into multimodal payload if there is no other text
+                    if not has_valid_text:
+                        thought = part.get("thinking") or part.get("text") or part.get("reasoning") or ""
+                        if thought:
+                            clean_list.append({"type": "text", "text": thought})
                 else:
                     clean_list.append(part)
             clean["content"] = clean_list
@@ -143,11 +155,86 @@ def clean_chat_message(msg: dict) -> dict:
     return clean
 
 
-def sanitize_messages_list(messages: list) -> list:
-    """Sanitize all messages in a conversation history list."""
+def validate_and_repair_tool_history(messages: list) -> list:
+    """
+    Ensure strict OpenAI/Mistral/Gemini tool-call ordering:
+    1. A 'tool' message MUST directly follow either an assistant message with matching tool_call_id,
+       or another valid 'tool' message from the same preceding assistant batch.
+    2. Any orphaned 'tool' message (whose parent assistant tool_call was lost, summarized away,
+       or sliced by context compaction) is safely converted to a user message:
+       {'role': 'user', 'content': f"[Previous Tool Result ({name})]:\n{content}"}
+       This completely eliminates HTTP 400 schema errors:
+         - Mistral: "Unexpected tool call id ... in tool results"
+         - Gemini: "Missing corresponding tool call for tool response message"
+    3. Any assistant message with 'tool_calls' that is NOT followed by tool responses before the
+       next user or assistant turn has clean synthetic tool responses injected so the parent
+       tool call is never left dangling.
+    """
     if not isinstance(messages, list):
         return messages
-    return [clean_chat_message(m) for m in messages if isinstance(m, dict)]
+
+    repaired = []
+    pending_tool_call_ids = set()
+    last_assistant_idx = None
+
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+
+        if role == "assistant":
+            # If previous assistant had unanswered tool calls, close them out first
+            if pending_tool_call_ids and last_assistant_idx is not None:
+                for missing_id in list(pending_tool_call_ids):
+                    repaired.append({
+                        "role": "tool",
+                        "tool_call_id": missing_id,
+                        "content": "[Tool execution completed]"
+                    })
+                pending_tool_call_ids.clear()
+
+            tc_list = m.get("tool_calls") or []
+            pending_tool_call_ids = {
+                tc.get("id") for tc in tc_list if isinstance(tc, dict) and tc.get("id")
+            }
+            last_assistant_idx = len(repaired)
+            repaired.append(m)
+
+        elif role == "tool":
+            call_id = m.get("tool_call_id")
+            if call_id and call_id in pending_tool_call_ids:
+                pending_tool_call_ids.discard(call_id)
+                repaired.append(m)
+            else:
+                # Orphaned tool response: convert to harmless user message retaining full content
+                t_name = m.get("name") or "tool"
+                content_str = str(m.get("content", ""))
+                repaired.append({
+                    "role": "user",
+                    "content": f"[Previous Tool Result ({t_name})]:\n{content_str}"
+                })
+
+        else:
+            # role is 'user', 'system', or 'developer'
+            if pending_tool_call_ids and last_assistant_idx is not None:
+                for missing_id in list(pending_tool_call_ids):
+                    repaired.append({
+                        "role": "tool",
+                        "tool_call_id": missing_id,
+                        "content": "[Tool execution completed]"
+                    })
+                pending_tool_call_ids.clear()
+            repaired.append(m)
+
+    return repaired
+
+
+def sanitize_messages_list(messages: list) -> list:
+    """Sanitize and repair all messages in a conversation history list."""
+    if not isinstance(messages, list):
+        return messages
+    cleaned = [clean_chat_message(m) for m in messages if isinstance(m, dict)]
+    return validate_and_repair_tool_history(cleaned)
 
 
 def get_model_max_output_tokens(model_name: str, model_info: dict | None = None) -> int | None:
@@ -266,9 +353,23 @@ def compact_conversation_history(messages: list, max_chars: int = COMPACTION_CHA
     if len(dialog_msgs) <= 4:
         return messages, False
 
-    # Split into historical middle and recent tail (last 4 messages)
-    history_slice = dialog_msgs[:-4]
-    recent_tail = dialog_msgs[-4:]
+    # Split into historical middle and recent tail.
+    # We find a clean turn boundary starting with a 'user' message to ensure
+    # we NEVER split inside an assistant tool-call / tool-response transaction.
+    user_indices = [i for i, m in enumerate(dialog_msgs) if isinstance(m, dict) and m.get("role") == "user"]
+    if len(user_indices) >= 2:
+        split_idx = user_indices[-2] if (len(dialog_msgs) - user_indices[-2]) <= 8 else user_indices[-1]
+    elif user_indices:
+        split_idx = user_indices[-1]
+    else:
+        split_idx = max(0, len(dialog_msgs) - 4)
+
+    # Ensure recent_tail does not begin with an orphaned tool message
+    while split_idx < len(dialog_msgs) and isinstance(dialog_msgs[split_idx], dict) and dialog_msgs[split_idx].get("role") == "tool":
+        split_idx += 1
+
+    history_slice = dialog_msgs[:split_idx]
+    recent_tail = dialog_msgs[split_idx:]
 
     summary_bullets = []
     for m in history_slice:
@@ -306,7 +407,14 @@ def compact_conversation_history(messages: list, max_chars: int = COMPACTION_CHA
         "content": "Acknowledged. I retain full awareness of the condensed conversation history and decisions, and will continue assisting you with the active tasks."
     }
 
-    compacted = system_msgs + [summary_user, summary_asst] + recent_tail
+    # Only include summary_asst if recent_tail starts with a user message so we don't produce consecutive assistant turns
+    if recent_tail and isinstance(recent_tail[0], dict) and recent_tail[0].get("role") == "user":
+        compacted = system_msgs + [summary_user, summary_asst] + recent_tail
+    else:
+        compacted = system_msgs + [summary_user] + recent_tail
+
+    # Validate and repair tool call integrity across the compacted list
+    compacted = validate_and_repair_tool_history(compacted)
     return compacted, True
 
 
@@ -357,14 +465,37 @@ class ParamSanitizer(CustomLogger):
         parent_otel_span: Any | None = None,
     ) -> list[dict]:
         self.load_quarantine()
-        if not self.quarantined_models:
-            return healthy_deployments
+
+        # Calculate approximate character size of conversation
+        msg_chars = 0
+        msgs = messages
+        if msgs is None and isinstance(request_kwargs, dict):
+            msgs = request_kwargs.get("messages")
+        if isinstance(msgs, list):
+            msg_chars = sum(len(str(m.get("content", ""))) for m in msgs if isinstance(m, dict))
 
         filtered = []
         for dep in healthy_deployments:
             dep_model = dep.get("litellm_params", {}).get("model") or dep.get("model")
-            if dep_model not in self.quarantined_models:
-                filtered.append(dep)
+            dep_str = str(dep_model)
+
+            # 1. Exclude quarantined models
+            if dep_str in self.quarantined_models or str(dep_model) in self.quarantined_models:
+                continue
+
+            # 2. Exclude 8K models (gpt-oss-20b) if conversation exceeds 20,000 chars (~5,000 tokens)
+            if "gpt-oss-20b" in dep_str and msg_chars > 20_000:
+                continue
+
+            # 3. Exclude Groq Qwen 27B if conversation exceeds its strict 7,000 TPM limit (~22,000 chars)
+            if "qwen3.8-27b" in dep_str and msg_chars > 22_000:
+                continue
+
+            # 4. Exclude 32K/65K models if conversation exceeds 100,000 chars (~25,000 tokens)
+            if msg_chars > 100_000 and any(k in dep_str for k in ("kilo-auto", "pennytree", "north-mini-code")):
+                continue
+
+            filtered.append(dep)
 
         return filtered if filtered else healthy_deployments
 
