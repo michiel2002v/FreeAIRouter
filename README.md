@@ -182,6 +182,22 @@ In `~/.config/opencode/opencode.json`:
 }
 ```
 
+### JetBrains Junie CLI
+In `~/.junie/config.json`:
+```json
+{
+  "provider": "litellm",
+  "model": "gemini-3.8-flash",
+  "byok": {
+    "litellm": {
+      "baseUrl": "http://127.0.0.1:5111",
+      "apiKey": "sk-free-llm"
+    }
+  }
+}
+```
+*Note: Junie validates model names against its catalog. FreeAIRouter aliases `gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gpt`, and `claude-sonnet-4-6` to the full `free-coder` load-balanced pool, and dynamically adapts terminal execution between OpenCode (`shell`) and Junie (`bash`).*
+
 ### Cursor / Continue / Cline / Roo Code / Aider
 - **Base URL**: `http://127.0.0.1:5111/v1`
 - **API Key**: `sk-free-llm` (or any string)

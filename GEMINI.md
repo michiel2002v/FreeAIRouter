@@ -180,12 +180,43 @@ OpenCode and `free-ai` are configured for multi-user access across all accounts 
 
 ---
 
-## 9. Essential Commands Reference
+## 9. JetBrains Junie CLI Integration
+
+JetBrains Junie (`~/.local/bin/junie`) connects directly to the FreeAIRouter LiteLLM proxy via its BYOK (Bring Your Own Key) LiteLLM provider:
+
+### Configuration (`~/.junie/config.json`)
+```json
+{
+  "provider": "litellm",
+  "model": "gemini-3.8-flash",
+  "byok": {
+    "litellm": {
+      "baseUrl": "http://127.0.0.1:5111",
+      "apiKey": "sk-free-llm"
+    }
+  }
+}
+```
+
+### Junie-Specific Adaptations
+1. **Model Catalog Aliasing**: Junie queries `/v1/model/info` and validates model IDs against an internal catalog enum. In `config.yaml`, `router_settings.model_group_alias` and `litellm_settings.model_alias` expose aliases (`gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gpt`, `claude-sonnet-4-6`) that map directly to the `free-coder` load-balanced pool.
+2. **Dynamic Tool Normalization**:
+   - OpenCode registers its terminal execution tool as `shell`.
+   - Junie registers its terminal execution tool as `bash`.
+   - In `clean_request.py`, `get_target_shell_tool` inspects the client's registered tools in the request:
+     - If the client registered `bash` and not `shell` (Junie), any hallucinated or mismatched tool calls (`shell`, `execute`, `sh`, `terminal`, `run_command`) normalize to `bash`.
+     - If the client registered `shell` (OpenCode), tool calls normalize to `shell`.
+   - Tool arguments remain standard (`{"command": "..."}`), enabling both Junie and OpenCode to operate concurrently without conflicts.
+
+---
+
+## 10. Essential Commands Reference
 
 | Command | Action |
 | :--- | :--- |
 | `opencode` | Launch interactive OpenCode TUI with auto-failover |
 | `free-ai standalone` | Launch OpenCode in isolated `--standalone` mode (private server) |
+| `junie` | Launch JetBrains Junie CLI with FreeAIRouter |
 | `free-ai status` | Show status of OpenCode, LiteLLM container, and provider keys |
 | `free-ai test` | Run live completion tests across all configured providers |
 | `free-ai last` | Show the exact upstream model that handled your last prompt and recent queue |
@@ -197,7 +228,7 @@ OpenCode and `free-ai` are configured for multi-user access across all accounts 
 
 ---
 
-## 10. Guidelines for AI Agents Working Here
+## 11. Guidelines for AI Agents Working Here
 
 1. **Environment Secrets**: Never commit or expose `~/notepad/free-llms/.env`. Use `os.environ` or Docker Compose environment mapping.
 2. **Keep Documentation in Sync**: When modifying models, routes, or hooks, update [`SETUP.md`](file:///home/michiel/ai/SETUP.md), [`GEMINI.md`](file:///home/michiel/ai/GEMINI.md), and [~/.config/opencode/opencode.json](file:///home/michiel/.config/opencode/opencode.json).

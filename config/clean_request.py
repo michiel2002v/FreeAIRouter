@@ -66,6 +66,32 @@ SHELL_COMMAND_PREFIXES = (
     "source ", "export ", "tar ", "unzip ", "bash ", "sh "
 )
 
+SHELL_TOOL_VARIANTS = ("execute", "bash", "sh", "terminal", "run_command", "shell")
+
+
+def get_target_shell_tool(data: dict) -> str:
+    """
+    Determine whether the client expects 'bash' (e.g. JetBrains Junie)
+    or 'shell' (e.g. OpenCode) based on registered tools in the request.
+    """
+    if not isinstance(data, dict):
+        return "shell"
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        names = set()
+        for t in tools:
+            if isinstance(t, dict):
+                fn = t.get("function")
+                if isinstance(fn, dict) and fn.get("name"):
+                    names.add(str(fn["name"]).lower())
+                elif t.get("name"):
+                    names.add(str(t["name"]).lower())
+        if "bash" in names and "shell" not in names:
+            return "bash"
+        if "shell" in names:
+            return "shell"
+    return "shell"
+
 
 def is_shell_command(cmd_str: str) -> bool:
     """Detect if a string is a bash shell command rather than JavaScript code."""
@@ -79,7 +105,7 @@ def is_shell_command(cmd_str: str) -> bool:
     return False
 
 
-def clean_chat_message(msg: dict) -> dict:
+def clean_chat_message(msg: dict, target_tool: str = "shell") -> dict:
     """
     Sanitize an individual message to strict OpenAI specification:
     - Retains only allowed keys: role, content, name, tool_calls, tool_call_id
@@ -153,7 +179,7 @@ def clean_chat_message(msg: dict) -> dict:
     # Sanitize tool responses that contain past JavaScript syntax errors from hallucinated execute
     if msg.get("role") == "tool":
         c_str = str(clean.get("content", ""))
-        if "Code must be plain JavaScript" in c_str or "Unknown tool 'shell'" in c_str:
+        if "Code must be plain JavaScript" in c_str or "Unknown tool 'shell'" in c_str or "Tool \"shell\" is not available" in c_str or "Tool 'shell' is not available" in c_str:
             clean["content"] = "[Tool execution completed]"
 
     # Sanitize and normalize tool_calls
@@ -169,8 +195,8 @@ def clean_chat_message(msg: dict) -> dict:
                     fn = dict(fn)
                     fn.pop("strict", None)
                     fn_name = fn.get("name", "")
-                    # Normalize hallucinated execute / bash / terminal tools to shell
-                    if fn_name in ("execute", "bash", "sh", "terminal", "run_command"):
+                    # Normalize hallucinated / mismatched shell tools to client's target tool (shell or bash)
+                    if fn_name in SHELL_TOOL_VARIANTS and fn_name != target_tool:
                         args_raw = fn.get("arguments", "{}")
                         try:
                             args_obj = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
@@ -179,10 +205,10 @@ def clean_chat_message(msg: dict) -> dict:
                         if isinstance(args_obj, dict):
                             cmd = args_obj.get("code") or args_obj.get("command") or args_obj.get("CommandLine") or ""
                             if cmd and is_shell_command(str(cmd)):
-                                fn["name"] = "shell"
+                                fn["name"] = target_tool
                                 fn["arguments"] = json.dumps({"command": str(cmd)})
                     t["function"] = fn
-                elif t.get("name") in ("execute", "bash", "sh", "terminal", "run_command"):
+                elif t.get("name") in SHELL_TOOL_VARIANTS and t.get("name") != target_tool:
                     t_name = t.get("name", "")
                     args_raw = t.get("arguments") or t.get("input") or {}
                     try:
@@ -192,7 +218,7 @@ def clean_chat_message(msg: dict) -> dict:
                     if isinstance(args_obj, dict):
                         cmd = args_obj.get("code") or args_obj.get("command") or ""
                         if cmd and is_shell_command(str(cmd)):
-                            t["name"] = "shell"
+                            t["name"] = target_tool
                             t["arguments"] = json.dumps({"command": str(cmd)})
                 clean_tools.append(t)
         if clean_tools:
@@ -281,11 +307,11 @@ def validate_and_repair_tool_history(messages: list) -> list:
     return repaired
 
 
-def sanitize_messages_list(messages: list) -> list:
+def sanitize_messages_list(messages: list, target_tool: str = "shell") -> list:
     """Sanitize and repair all messages in a conversation history list."""
     if not isinstance(messages, list):
         return messages
-    cleaned = [clean_chat_message(m) for m in messages if isinstance(m, dict)]
+    cleaned = [clean_chat_message(m, target_tool=target_tool) for m in messages if isinstance(m, dict)]
     return validate_and_repair_tool_history(cleaned)
 
 
@@ -733,7 +759,8 @@ class ParamSanitizer(CustomLogger):
                 messages = compacted_msgs
 
             # Clean and sanitize each message to strict OpenAI schema
-            data["messages"] = sanitize_messages_list(messages)
+            target_tool = get_target_shell_tool(data)
+            data["messages"] = sanitize_messages_list(messages, target_tool=target_tool)
 
         return data
 
@@ -759,7 +786,8 @@ class ParamSanitizer(CustomLogger):
         response: Any,
     ) -> Any:
         try:
-            # Normalize any hallucinated execute tool calls in response choices to shell
+            # Normalize any hallucinated / mismatched shell tools in response choices to client's target tool (shell or bash)
+            target_tool = get_target_shell_tool(data)
             choices = getattr(response, "choices", None)
             if choices and isinstance(choices, list):
                 for choice in choices:
@@ -771,7 +799,7 @@ class ParamSanitizer(CustomLogger):
                                 fn = getattr(tc, "function", None)
                                 if fn:
                                     fn_name = getattr(fn, "name", "")
-                                    if fn_name in ("execute", "bash", "sh", "terminal", "run_command"):
+                                    if fn_name in SHELL_TOOL_VARIANTS and fn_name != target_tool:
                                         args_str = getattr(fn, "arguments", "{}")
                                         try:
                                             args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
@@ -780,7 +808,7 @@ class ParamSanitizer(CustomLogger):
                                         if isinstance(args_dict, dict):
                                             cmd = args_dict.get("code") or args_dict.get("command") or args_dict.get("CommandLine") or ""
                                             if cmd and is_shell_command(str(cmd)):
-                                                fn.name = "shell"
+                                                fn.name = target_tool
                                                 fn.arguments = json.dumps({"command": str(cmd)})
 
             hidden = getattr(response, "_hidden_params", {}) or {}

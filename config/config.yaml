@@ -217,6 +217,12 @@ router_settings:
   fallback_on_unsupported_params: true
   model_group_alias:
     "auto-free/free-coder": "free-coder"
+    "gemini-3.8-flash": "free-coder"
+    "gemini-3.5-flash-lite": "free-coder"
+    "gemini-flash": "free-coder"
+    "gemini-pro": "free-coder"
+    "gpt": "free-coder"
+    "claude-sonnet-4-6": "free-coder"
   fallbacks:
     - free-coder:
         - "mistral/codestral-latest"
@@ -238,6 +244,12 @@ litellm_settings:
   drop_params: true
   model_alias:
     "auto-free/free-coder": "free-coder"
+    "gemini-3.8-flash": "free-coder"
+    "gemini-3.5-flash-lite": "free-coder"
+    "gemini-flash": "free-coder"
+    "gemini-pro": "free-coder"
+    "gpt": "free-coder"
+    "claude-sonnet-4-6": "free-coder"
 
 general_settings:
   dangerously_permit_weak_or_unset_master_key: true
