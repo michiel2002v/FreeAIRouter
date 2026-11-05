@@ -60,6 +60,24 @@ MAX_TOOL_OUTPUT_CHARS = 1000       # Historical tool outputs truncated to preser
 # Standard permitted keys in OpenAI ChatCompletion messages
 ALLOWED_MESSAGE_KEYS = {"role", "content", "name", "tool_calls", "tool_call_id"}
 
+SHELL_COMMAND_PREFIXES = (
+    "cd ", "git ", "rm ", "mkdir ", "ls ", "make ", "docker ", "python", "pip",
+    "npm ", "pnpm ", "curl ", "wget ", "cat ", "grep ", "find ", "echo ", "touch ",
+    "source ", "export ", "tar ", "unzip ", "bash ", "sh "
+)
+
+
+def is_shell_command(cmd_str: str) -> bool:
+    """Detect if a string is a bash shell command rather than JavaScript code."""
+    if not isinstance(cmd_str, str):
+        return False
+    s = cmd_str.strip()
+    if any(s.startswith(p) for p in SHELL_COMMAND_PREFIXES):
+        return True
+    if " && " in s or " || " in s or " | " in s or s.startswith("./") or s.startswith("/"):
+        return True
+    return False
+
 
 def clean_chat_message(msg: dict) -> dict:
     """
@@ -132,7 +150,13 @@ def clean_chat_message(msg: dict) -> dict:
     else:
         clean["content"] = str(content)
 
-    # Sanitize tool_calls
+    # Sanitize tool responses that contain past JavaScript syntax errors from hallucinated execute
+    if msg.get("role") == "tool":
+        c_str = str(clean.get("content", ""))
+        if "Code must be plain JavaScript" in c_str or "Unknown tool 'shell'" in c_str:
+            clean["content"] = "[Tool execution completed]"
+
+    # Sanitize and normalize tool_calls
     tool_calls = msg.get("tool_calls")
     if tool_calls and isinstance(tool_calls, list) and len(tool_calls) > 0:
         clean_tools = []
@@ -140,8 +164,36 @@ def clean_chat_message(msg: dict) -> dict:
             if isinstance(tc, dict):
                 t = dict(tc)
                 t.pop("strict", None)
-                if isinstance(t.get("function"), dict):
-                    t["function"].pop("strict", None)
+                fn = t.get("function")
+                if isinstance(fn, dict):
+                    fn = dict(fn)
+                    fn.pop("strict", None)
+                    fn_name = fn.get("name", "")
+                    # Normalize hallucinated execute / bash / terminal tools to shell
+                    if fn_name in ("execute", "bash", "sh", "terminal", "run_command"):
+                        args_raw = fn.get("arguments", "{}")
+                        try:
+                            args_obj = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                        except Exception:
+                            args_obj = {}
+                        if isinstance(args_obj, dict):
+                            cmd = args_obj.get("code") or args_obj.get("command") or args_obj.get("CommandLine") or ""
+                            if cmd and is_shell_command(str(cmd)):
+                                fn["name"] = "shell"
+                                fn["arguments"] = json.dumps({"command": str(cmd)})
+                    t["function"] = fn
+                elif t.get("name") in ("execute", "bash", "sh", "terminal", "run_command"):
+                    t_name = t.get("name", "")
+                    args_raw = t.get("arguments") or t.get("input") or {}
+                    try:
+                        args_obj = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    except Exception:
+                        args_obj = {}
+                    if isinstance(args_obj, dict):
+                        cmd = args_obj.get("code") or args_obj.get("command") or ""
+                        if cmd and is_shell_command(str(cmd)):
+                            t["name"] = "shell"
+                            t["arguments"] = json.dumps({"command": str(cmd)})
                 clean_tools.append(t)
         if clean_tools:
             clean["tool_calls"] = clean_tools
@@ -332,6 +384,32 @@ def is_defunct_model_error(exc: Exception) -> bool:
     return any(k in msg for k in keywords)
 
 
+def is_transient_error(exc: Exception) -> bool:
+    """Check if an exception indicates a transient failure: 429 RateLimit, 503 UNAVAILABLE/High Demand, 408 Timeout."""
+    if exc is None:
+        return False
+    status = getattr(exc, "status_code", None)
+    if status in (429, 503, 408, 502, 504):
+        return True
+    cls_name = type(exc).__name__
+    if cls_name in ("RateLimitError", "ServiceUnavailableError", "Timeout", "APIConnectionError"):
+        return True
+    msg = str(exc).lower()
+    keywords = [
+        "rate limit",
+        "too many requests",
+        "experiencing high demand",
+        "service unavailable",
+        "temporarily unavailable",
+        "timed out",
+        "timeout",
+        "503",
+        "429",
+        "408",
+    ]
+    return any(k in msg for k in keywords)
+
+
 def compact_conversation_history(messages: list, max_chars: int = COMPACTION_CHAR_THRESHOLD) -> tuple[list, bool]:
     """
     Lossless-Priority Context Compactor:
@@ -422,8 +500,25 @@ class ParamSanitizer(CustomLogger):
     def __init__(self):
         super().__init__()
         self.quarantined_models: dict[str, dict] = {}
+        self.transient_cooldowns: dict[str, float] = {}
         self._last_quarantine_check = 0.0
         self.load_quarantine()
+
+    def set_transient_cooldown(self, model: str, duration: float = 180.0, reason: str = ""):
+        """Temporarily bypass a deployment experiencing rate limits or capacity spikes."""
+        now = time.time()
+        self.transient_cooldowns[model] = now + duration
+        clean_model = model.replace("openai/", "").replace("openrouter/", "").replace("gemini/", "").replace("groq/", "")
+        print(f"⏳ [COOLDOWN] Put {clean_model} on {int(duration)}s transient cooldown (Reason: {reason[:60]})", flush=True)
+
+    def is_in_transient_cooldown(self, model: str) -> bool:
+        if not model or model not in self.transient_cooldowns:
+            return False
+        now = time.time()
+        if now < self.transient_cooldowns[model]:
+            return True
+        del self.transient_cooldowns[model]
+        return False
 
     def load_quarantine(self):
         now = time.time()
@@ -483,6 +578,10 @@ class ParamSanitizer(CustomLogger):
             if dep_str in self.quarantined_models or str(dep_model) in self.quarantined_models:
                 continue
 
+            # 1b. Exclude models on transient cooldown (e.g. 503 high demand spikes or 429 rate limits)
+            if self.is_in_transient_cooldown(dep_str) or self.is_in_transient_cooldown(str(dep_model)):
+                continue
+
             # 2. Exclude 8K models (gpt-oss-20b) if conversation exceeds 20,000 chars (~5,000 tokens)
             if "gpt-oss-20b" in dep_str and msg_chars > 20_000:
                 continue
@@ -496,6 +595,13 @@ class ParamSanitizer(CustomLogger):
                 continue
 
             filtered.append(dep)
+
+        if not filtered and healthy_deployments:
+            # Fall back to healthy non-quarantined deployments if transient cooldowns excluded all
+            filtered = [
+                d for d in healthy_deployments
+                if str(d.get("litellm_params", {}).get("model") or d.get("model")) not in self.quarantined_models
+            ]
 
         return filtered if filtered else healthy_deployments
 
@@ -577,6 +683,10 @@ class ParamSanitizer(CustomLogger):
                         f"⚠️ [CONTEXT-OVERFLOW] Deployment {model_str} exceeded context window. Summarization engine engaged on failover.",
                         flush=True,
                     )
+
+                # 4. Check for transient errors: 429 RateLimit, 503 UNAVAILABLE/Capacity, 408 Timeout
+                if is_transient_error(exception):
+                    self.set_transient_cooldown(model_str, duration=180.0, reason=str(exception))
         except Exception as e:
             print(f"Error in failure deployment hook: {e}", flush=True)
 
@@ -647,6 +757,30 @@ class ParamSanitizer(CustomLogger):
         response: Any,
     ) -> Any:
         try:
+            # Normalize any hallucinated execute tool calls in response choices to shell
+            choices = getattr(response, "choices", None)
+            if choices and isinstance(choices, list):
+                for choice in choices:
+                    msg = getattr(choice, "message", None)
+                    if msg:
+                        tc_list = getattr(msg, "tool_calls", None)
+                        if tc_list and isinstance(tc_list, list):
+                            for tc in tc_list:
+                                fn = getattr(tc, "function", None)
+                                if fn:
+                                    fn_name = getattr(fn, "name", "")
+                                    if fn_name in ("execute", "bash", "sh", "terminal", "run_command"):
+                                        args_str = getattr(fn, "arguments", "{}")
+                                        try:
+                                            args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                        except Exception:
+                                            args_dict = {}
+                                        if isinstance(args_dict, dict):
+                                            cmd = args_dict.get("code") or args_dict.get("command") or args_dict.get("CommandLine") or ""
+                                            if cmd and is_shell_command(str(cmd)):
+                                                fn.name = "shell"
+                                                fn.arguments = json.dumps({"command": str(cmd)})
+
             hidden = getattr(response, "_hidden_params", {}) or {}
             model = hidden.get("litellm_model_name") or hidden.get("provider_response_model") or data.get("model")
             clean = str(model).replace("openai/", "").replace("openrouter/", "").replace("gemini/", "").replace("groq/", "").replace("mistral/", "")

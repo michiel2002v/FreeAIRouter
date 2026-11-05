@@ -8,7 +8,7 @@
 
 ## 1. System Architecture
 
-This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 18 free-tier LLM deployments with latency-based load balancing, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and context window compaction.
+This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 17 free-tier LLM deployments with latency-based load balancing, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and context window compaction.
 
 ```mermaid
 flowchart TD
@@ -18,13 +18,14 @@ flowchart TD
     subgraph RouterCore ["Router Intelligence & Safety Layer"]
         LiteLLM --> Compactor["Context Compactor (In-Flight Summarizer)"]
         Compactor --> Clamper["Output Token Clamper (4096 / 16K safety)"]
-        Clamper --> Balancer["Latency-Based Load Balancer + 60s Cooldown"]
+        Clamper --> Balancer["Latency-Based Load Balancer + 120s Cooldown"]
+        Balancer --> ToolGuard["Tool Integrity Guard (execute->shell normalization)"]
     end
 
-    subgraph Deployments ["18-Deployment Failover Pool"]
-        Balancer --> Frontier["Tier 1: Frontier Models (Nemotron 550B, Gemini 3.8 Flash, Codestral, Llama 3.3 70B, GPT-OSS 120B)"]
-        Balancer --> Coding["Tier 2: Dedicated Coding & Math (Command R+, Groq Qwen 27B, Nemotron Lightning, North Mini Code)"]
-        Balancer --> Fallbacks["Tier 3: Resilient Fallbacks (Gemini 3.5 Flash/Lite, DeepSeek V4, Kilo, NVIDIA NIM, OpenRouter Free)"]
+    subgraph Deployments ["17-Deployment Failover Pool"]
+        ToolGuard --> Frontier["Tier 1: Frontier Models (Nemotron 550B, Gemini 3.8 Flash, Codestral, Llama 3.3 70B, GPT-OSS 120B)"]
+        ToolGuard --> Coding["Tier 2: Dedicated Coding & Math (Command R+, Groq Qwen 27B, Nemotron Lightning, North Mini Code)"]
+        ToolGuard --> Fallbacks["Tier 3: Resilient Fallbacks (Gemini 3.5 Flash/Lite, DeepSeek V4, Kilo, NVIDIA NIM)"]
     end
 ```
 
@@ -52,9 +53,8 @@ All models are accessed via free-tier keys loaded from `~/notepad/free-llms/.env
 | **14** | **Aion Labs** | `openai/aion-labs/aion-2.0` | 128K context reasoning |
 | **15** | **Zhipu AI** | `openai/glm-4.7-flash` | 128K context GLM-4.7 Flash reasoning |
 | **16** | **Requesty** | `openai/policy/pennytree-free` | Zero-cost policy reasoning model (32K context) |
-| **17** | **OpenRouter** | `openrouter/openrouter/free` | Community dynamic free router fallback |
 
-*(Note: 8K-context models like NVIDIA NIM `gpt-oss-20b` are excluded from the main coding pool to ensure agents never hit premature context ceilings).*
+*(Note: Unvetted wildcards like `openrouter/openrouter/free` and 8K-context models like NVIDIA NIM `gpt-oss-20b` are excluded from the main coding pool to ensure agents never hit premature context ceilings or hallucinate non-existent tools).*
 
 ---
 
@@ -120,6 +120,8 @@ Powered by [`~/.local/bin/summarize-context.py`](file:///home/michiel/.local/bin
 In [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py):
 - `clean_chat_message`: Sanitizes every message to strict OpenAI schema, stripping non-standard reasoning blocks and rescuing thought text into `content` **only** if the message would otherwise be completely empty.
 - `validate_and_repair_tool_history`: Enforces strict OpenAI tool-call ordering. Safely converts any orphaned `tool` results into user messages, and ensures every assistant `tool_calls` has its required responses.
+- `Tool Hallucination Guard`: Automatically normalizes hallucinated tool calls (e.g. models calling `execute`, `bash`, `sh`, `run_command` with bash commands) into OpenCode's native `shell` tool (`command: "..."`). Also cleans JavaScript SyntaxError remnants from message history.
+- `Transient Error Cooldown Engine`: Automatically detects transient 429 (RateLimit), 503 (UNAVAILABLE/High Demand), and 408 (Timeout) spikes, placing affected deployments on a 180s cooldown to prevent cascading mid-stream failures in coding agents.
 - Router timeout is set to 60s to prevent premature read timeouts on heavy fallback payloads.
 
 ---

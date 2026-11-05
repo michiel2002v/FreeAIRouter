@@ -119,12 +119,6 @@ model_list:
     model_info:
       max_input_tokens: 1000000
 
-  # 18. OpenRouter Free Dynamic Router - Catches anything remaining
-  - model_name: free-coder
-    litellm_params:
-      model: openrouter/openrouter/free
-      api_key: os.environ/OPENROUTER_API_KEY
-
   # --------------------------------------------------------------------------
   # 2. Direct Target Deployments (Exposed for manual selection in OpenCode TUI)
   # --------------------------------------------------------------------------
@@ -163,7 +157,7 @@ model_list:
 router_settings:
   routing_strategy: latency-based-routing
   allowed_fails: 1
-  cooldown_time: 60
+  cooldown_time: 120
   num_retries: 5
   timeout: 60
   fallback_on_unsupported_params: true
@@ -171,8 +165,9 @@ router_settings:
     "auto-free/free-coder": "free-coder"
   fallbacks:
     - free-coder:
-        - "gemini/gemini-3.8-flash"
         - "mistral/codestral-latest"
+        - "groq/openai/gpt-oss-120b"
+        - "openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   retry_policy:
     BadRequestErrorRetries: 3
     TimeoutErrorRetries: 3
