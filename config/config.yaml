@@ -1,123 +1,177 @@
 model_list:
   # --------------------------------------------------------------------------
-  # 1. Main Failover Group: 'free-coder' (Auto-Router across all 15 deployments)
+  # 1. Main Failover Group: 'free-coder' (16 Vetted Deployments)
+  # Dynamic Multi-Session Load Balancing with Tier Isolation & Least-Busy Distribution
   # --------------------------------------------------------------------------
+
+  # --- TIER 1: Frontier Models (order: 1) ---
   # 1. Mistral Codestral - Premier dedicated code model (256K context, FIM, SOTA coding benchmarks)
   - model_name: free-coder
     litellm_params:
       model: mistral/codestral-latest
       api_key: os.environ/MISTRAL_API_KEY
+      order: 1
+      rpm: 30
+      max_parallel_requests: 2
 
   # 2. Google Gemini 3.8 Flash - Highest ranking frontier multimodal flash model (1M+ context)
   - model_name: free-coder
     litellm_params:
       model: gemini/gemini-3.8-flash
       api_key: os.environ/GEMINI_API_KEY
+      order: 1
+      rpm: 15
+      max_parallel_requests: 3
 
   # 3. Groq GPT-OSS 120B - 120B frontier reasoning model (~200ms on Groq LPU)
   - model_name: free-coder
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
+      order: 1
+      rpm: 30
+      max_parallel_requests: 2
 
-  # 4. Cohere Command R+ (via OpenAI Compatibility v1) - 128K frontier tool model
-  - model_name: free-coder
-    litellm_params:
-      model: openai/command-r-plus-08-2024
-      api_base: https://api.cohere.com/compatibility/v1
-      api_key: os.environ/COHERE_API_KEY
-    model_info:
-      max_output_tokens: 4096
-      max_tokens: 4096
-
-  # 5. Groq Qwen 3.8 27B - Top-tier algorithmic coding and math reasoning
-  - model_name: free-coder
-    litellm_params:
-      model: groq/qwen/qwen3.8-27b
-      api_key: os.environ/GROQ_API_KEY
-    model_info:
-      max_output_tokens: 16384
-
-  # 6. OpenRouter Cohere North Mini Code - Dedicated SOTA free coding model (65K context)
-  - model_name: free-coder
-    litellm_params:
-      model: openrouter/cohere/north-mini-code:free
-      api_key: os.environ/OPENROUTER_API_KEY
-    model_info:
-      max_output_tokens: 4096
-
-  # 7. Kilo Code Auto Router - Free coding router (Reflection Beam & free coder models)
-  - model_name: free-coder
-    litellm_params:
-      model: openai/kilo-auto/free
-      api_base: https://api.kilo.ai/api/gateway
-      api_key: os.environ/KILO_API_KEY
-
-  # 8. Gonka Broker - DeepSeek V4 Flash reasoning (400K context, ~170ms)
-  - model_name: free-coder
-    litellm_params:
-      model: openai/deepseek-ai/DeepSeek-V4-Flash-0731
-      api_base: https://proxy.gonkabroker.com/v1
-      api_key: os.environ/GONKA_API_KEY
-
-  # 9. Google Gemini 3.5 Flash - Secondary frontier fallback (1M context)
-  - model_name: free-coder
-    litellm_params:
-      model: gemini/gemini-3.5-flash
-      api_key: os.environ/GEMINI_API_KEY
-
-  # 10. Google Gemini 3.5 Flash-Lite - High-availability tertiary fallback
-  - model_name: free-coder
-    litellm_params:
-      model: gemini/gemini-3.5-flash-lite
-      api_key: os.environ/GEMINI_API_KEY
-
-  # 11. Aion Labs - 128K context reasoning
-  - model_name: free-coder
-    litellm_params:
-      model: openai/aion-labs/aion-2.0
-      api_base: https://api.aionlabs.ai/v1
-      api_key: os.environ/AION_API_KEY
-
-  # 13. Zhipu AI (Z AI) - GLM-4.7-Flash reasoning
-  - model_name: free-coder
-    litellm_params:
-      model: openai/glm-4.7-flash
-      api_base: https://open.bigmodel.cn/api/paas/v4
-      api_key: os.environ/ZAI_API_KEY
-
-  # 14. Requesty - Pennytree free reasoning model
-  - model_name: free-coder
-    litellm_params:
-      model: openai/policy/pennytree-free
-      api_base: https://router.requesty.ai/v1
-      api_key: os.environ/REQUESTY_API_KEY
-
-  # 15. NVIDIA Nemotron 3 Ultra 550B - SOTA 550B Parameter Ultra Frontier Reasoning (1M Context)
+  # 4. OpenRouter NVIDIA Nemotron 3 Ultra 550B - SOTA 550B Parameter Ultra Frontier Reasoning (1M Context)
   - model_name: free-coder
     litellm_params:
       model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
       api_key: os.environ/OPENROUTER_API_KEY
+      order: 1
+      rpm: 20
+      max_parallel_requests: 2
     model_info:
       max_input_tokens: 1000000
 
-  # 16. Cloudflare Workers AI Llama 3.3 70B - Frontier 70B Open-Weights Model (~500ms)
+  # 5. Cloudflare Workers AI Llama 3.3 70B - Frontier 70B Open-Weights Model (~500ms edge inference)
   - model_name: free-coder
     litellm_params:
       model: openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
       api_base: https://api.cloudflare.com/client/v4/accounts/d3f4b0ac47a42b21b1b9b9c8b692ceab/ai/v1
       api_key: os.environ/CF_API_TOKEN
+      order: 1
+      rpm: 100
+      max_parallel_requests: 4
     model_info:
       max_output_tokens: 8192
       max_input_tokens: 128000
 
-  # 17. NVIDIA Nemotron 3.5 Lightning - 1M Context Ultra-Fast Reasoning
+  # --- TIER 2: Dedicated Coding & Algorithmic Reasoning (order: 2) ---
+  # 6. Cohere Command R+ (via OpenAI Compatibility v1) - 128K frontier tool model
+  - model_name: free-coder
+    litellm_params:
+      model: openai/command-r-plus-08-2024
+      api_base: https://api.cohere.com/compatibility/v1
+      api_key: os.environ/COHERE_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 2
+    model_info:
+      max_output_tokens: 4096
+      max_tokens: 4096
+
+  # 7. Groq Qwen 3.8 27B - Top-tier algorithmic coding and math reasoning
+  - model_name: free-coder
+    litellm_params:
+      model: groq/qwen/qwen3.8-27b
+      api_key: os.environ/GROQ_API_KEY
+      order: 2
+      rpm: 30
+      tpm: 7000
+      max_parallel_requests: 1
+    model_info:
+      max_output_tokens: 16384
+
+  # 8. OpenRouter Cohere North Mini Code - Dedicated SOTA free coding model (65K context)
+  - model_name: free-coder
+    litellm_params:
+      model: openrouter/cohere/north-mini-code:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 2
+    model_info:
+      max_output_tokens: 4096
+
+  # 9. NVIDIA Nemotron 3.5 Lightning - 1M Context Ultra-Fast Reasoning
   - model_name: free-coder
     litellm_params:
       model: openrouter/nvidia/nemotron-3.5-lightning:free
       api_key: os.environ/OPENROUTER_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 2
     model_info:
       max_input_tokens: 1000000
+
+  # 10. Gonka Broker - DeepSeek V4 Flash reasoning (400K context, ~170ms)
+  - model_name: free-coder
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-V4-Flash-0731
+      api_base: https://proxy.gonkabroker.com/v1
+      api_key: os.environ/GONKA_API_KEY
+      order: 2
+      rpm: 30
+      max_parallel_requests: 2
+
+  # --- TIER 3: Resilient High-Availability Fallbacks (order: 3) ---
+  # 11. Google Gemini 3.5 Flash - Secondary frontier fallback (1M context)
+  - model_name: free-coder
+    litellm_params:
+      model: gemini/gemini-3.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+      order: 3
+      rpm: 15
+      max_parallel_requests: 3
+
+  # 12. Google Gemini 3.5 Flash-Lite - High-availability tertiary fallback
+  - model_name: free-coder
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+      order: 3
+      rpm: 30
+      max_parallel_requests: 3
+
+  # 13. Kilo Code Auto Router - Free coding router (Reflection Beam & free coder models)
+  - model_name: free-coder
+    litellm_params:
+      model: openai/kilo-auto/free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 2
+
+  # 14. Aion Labs - 128K context reasoning
+  - model_name: free-coder
+    litellm_params:
+      model: openai/aion-labs/aion-2.0
+      api_base: https://api.aionlabs.ai/v1
+      api_key: os.environ/AION_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 2
+
+  # 15. Zhipu AI (Z AI) - GLM-4.7-Flash reasoning
+  - model_name: free-coder
+    litellm_params:
+      model: openai/glm-4.7-flash
+      api_base: https://open.bigmodel.cn/api/paas/v4
+      api_key: os.environ/ZAI_API_KEY
+      order: 3
+      rpm: 30
+      max_parallel_requests: 2
+
+  # 16. Requesty - Pennytree free reasoning model
+  - model_name: free-coder
+    litellm_params:
+      model: openai/policy/pennytree-free
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 2
 
   # --------------------------------------------------------------------------
   # 2. Direct Target Deployments (Exposed for manual selection in OpenCode TUI)
@@ -155,7 +209,7 @@ model_list:
       max_output_tokens: 4096
 
 router_settings:
-  routing_strategy: latency-based-routing
+  routing_strategy: least-busy
   allowed_fails: 1
   cooldown_time: 120
   num_retries: 5
@@ -166,6 +220,7 @@ router_settings:
   fallbacks:
     - free-coder:
         - "mistral/codestral-latest"
+        - "gemini/gemini-3.8-flash"
         - "groq/openai/gpt-oss-120b"
         - "openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   retry_policy:

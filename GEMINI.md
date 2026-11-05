@@ -8,24 +8,24 @@
 
 ## 1. System Architecture
 
-This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 17 free-tier LLM deployments with latency-based load balancing, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and context window compaction.
+This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 16 vetted free-tier LLM deployments with `least-busy` concurrency-aware load balancing, 3 hierarchical priority tiers, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and in-flight context window compaction.
 
 ```mermaid
 flowchart TD
-    User["Developer / Agent"] -->|opencode| OC["OpenCode CLI"]
+    User["Developer / Agent"] -->|opencode (Parallel Sessions)| OC["OpenCode CLI"]
     OC -->|Default: 'auto-free/free-coder'| LiteLLM["LiteLLM Router (Docker :5111)"]
 
     subgraph RouterCore ["Router Intelligence & Safety Layer"]
         LiteLLM --> Compactor["Context Compactor (In-Flight Summarizer)"]
         Compactor --> Clamper["Output Token Clamper (4096 / 16K safety)"]
-        Clamper --> Balancer["Latency-Based Load Balancer + 120s Cooldown"]
+        Clamper --> Balancer["Multi-Session Least-Busy Balancer + 120s Cooldown"]
         Balancer --> ToolGuard["Tool Integrity Guard (execute->shell normalization)"]
     end
 
-    subgraph Deployments ["17-Deployment Failover Pool"]
-        ToolGuard --> Frontier["Tier 1: Frontier Models (Nemotron 550B, Gemini 3.8 Flash, Codestral, Llama 3.3 70B, GPT-OSS 120B)"]
-        ToolGuard --> Coding["Tier 2: Dedicated Coding & Math (Command R+, Groq Qwen 27B, Nemotron Lightning, North Mini Code)"]
-        ToolGuard --> Fallbacks["Tier 3: Resilient Fallbacks (Gemini 3.5 Flash/Lite, DeepSeek V4, Kilo, NVIDIA NIM)"]
+    subgraph Deployments ["Hierarchical 3-Tier Failover & Concurrency Pool"]
+        ToolGuard --> Frontier["Tier 1 (order: 1): Frontier Models (Codestral 256K, Gemini 3.8 Flash 1M, Groq GPT-OSS 120B, Nemotron 550B, Llama 3.3 70B)"]
+        ToolGuard --> Coding["Tier 2 (order: 2): Dedicated Coding & Math (Command R+, Groq Qwen 27B, Nemotron Lightning, North Mini Code, DeepSeek V4)"]
+        ToolGuard --> Fallbacks["Tier 3 (order: 3): Resilient Fallbacks (Gemini 3.5 Flash/Lite, Kilo, Aion, GLM 4.7, Requesty)"]
     end
 ```
 
@@ -138,7 +138,39 @@ When upstream providers retire or alter free models (e.g. HTTP 404):
 
 ---
 
-## 7. Multi-User Architecture & System-Wide Sharing
+## 7. Multi-Session Concurrency & Parallel Execution
+
+The router and OpenCode are fully optimized to run **multiple parallel sessions simultaneously without cross-talk, resource contention, or rate-limit lockouts**:
+
+### 1. In-Flight `least-busy` Load Balancing
+- Instead of dumping all requests into the single fastest endpoint (which causes 429 rate limits when 2+ sessions run simultaneously), LiteLLM uses `routing_strategy: least-busy`.
+- When Session 1 is generating code with Codestral, its in-flight counter increments (`active_calls = 1`).
+- When Session 2 sends a concurrent prompt, the router detects Codestral is active and immediately dispatches Session 2 to another idle Tier 1 model (e.g. Gemini 3.8 Flash, Groq GPT-OSS 120B, Cloudflare Llama 3.3, or Nemotron 550B).
+- Both sessions generate code simultaneously in parallel at peak throughput.
+
+### 2. Hierarchical Priority Tiering (`order: 1 / 2 / 3`)
+- Deployments are partitioned into strict priority orders:
+  - **Tier 1 (`order: 1`)**: Frontier models (Codestral, Gemini 3.8 Flash, Groq 120B, Nemotron 550B, Llama 3.3 70B).
+  - **Tier 2 (`order: 2`)**: Dedicated coding models (Command R+, Groq Qwen 27B, Cohere North Mini Code, Nemotron Lightning, DeepSeek V4).
+  - **Tier 3 (`order: 3`)**: High-availability fallbacks (Gemini 3.5 Flash/Lite, Kilo Code, Aion, GLM 4.7 Flash, Requesty).
+- The router always balances among Tier 1 endpoints first. If all Tier 1 models are occupied or on transient cooldown, traffic spills over to Tier 2, and then Tier 3.
+
+### 3. Concurrency Protection (`max_parallel_requests` & `rpm`)
+- Strict providers have explicit concurrency ceilings (e.g. Groq: 2, Mistral: 2, Gemini: 3, Cloudflare: 4).
+- When a provider reaches its concurrency limit, additional parallel requests are dynamically redirected to alternative providers rather than failing.
+
+### 4. OpenCode Parallel Workflows
+- **Separate Projects**: Running `opencode` in different project directories connects to the daemon with completely independent session IDs, histories, and git watchers.
+- **Same Project Concurrent Sessions**: To run two independent sessions within the same project directory, pass `--session ses_<unique_name>` (e.g., `opencode --session ses_refactor`), or run in standalone mode with `free-ai standalone` / `opencode --standalone`.
+
+### 5. Multi-Session Logging & Real-Time Observability
+- All completions across all concurrent sessions are recorded in `/app/state/recent_completions.log`.
+- Run `free-ai last` to see the last routed model and the recent parallel multi-session queue.
+- Run `free-ai watch` to stream live multi-session routing decisions as both sessions generate responses.
+
+---
+
+## 8. Multi-User Architecture & System-Wide Sharing
 
 OpenCode and `free-ai` are configured for multi-user access across all accounts on this Ubuntu system:
 - **Centralized Proxy**: The LiteLLM Docker container (`free-llm-router`) listens on port `5111` (`127.0.0.1:5111`), allowing any local user to utilize the 18 free-tier LLM failover pool without exposing raw provider API keys.
@@ -148,15 +180,16 @@ OpenCode and `free-ai` are configured for multi-user access across all accounts 
 
 ---
 
-## 8. Essential Commands Reference
+## 9. Essential Commands Reference
 
 | Command | Action |
 | :--- | :--- |
 | `opencode` | Launch interactive OpenCode TUI with auto-failover |
+| `free-ai standalone` | Launch OpenCode in isolated `--standalone` mode (private server) |
 | `free-ai status` | Show status of OpenCode, LiteLLM container, and provider keys |
 | `free-ai test` | Run live completion tests across all configured providers |
-| `free-ai last` | Show the exact upstream model that handled your last prompt |
-| `free-ai watch` | Stream real-time routing decisions as you code |
+| `free-ai last` | Show the exact upstream model that handled your last prompt and recent queue |
+| `free-ai watch` | Stream real-time routing decisions as you code across all sessions |
 | `free-ai summarize <file>` | Generate an executive technical summary using a frontier model |
 | `free-ai auto-heal` | Manually run the self-healing watchdog and inspect logs |
 | `free-ai router restart` | Restart the Docker Compose router stack |
@@ -164,7 +197,7 @@ OpenCode and `free-ai` are configured for multi-user access across all accounts 
 
 ---
 
-## 9. Guidelines for AI Agents Working Here
+## 10. Guidelines for AI Agents Working Here
 
 1. **Environment Secrets**: Never commit or expose `~/notepad/free-llms/.env`. Use `os.environ` or Docker Compose environment mapping.
 2. **Keep Documentation in Sync**: When modifying models, routes, or hooks, update [`SETUP.md`](file:///home/michiel/ai/SETUP.md), [`GEMINI.md`](file:///home/michiel/ai/GEMINI.md), and [~/.config/opencode/opencode.json](file:///home/michiel/.config/opencode/opencode.json).

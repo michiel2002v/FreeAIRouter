@@ -546,8 +546,10 @@ class ParamSanitizer(CustomLogger):
             print(log_line, flush=True)
             try:
                 os.makedirs(os.path.dirname(QUARANTINE_FILE), exist_ok=True)
-                with open(QUARANTINE_FILE, "w") as f:
+                tmp_file = f"{QUARANTINE_FILE}.tmp.{os.getpid()}"
+                with open(tmp_file, "w") as f:
                     json.dump(self.quarantined_models, f, indent=2)
+                os.replace(tmp_file, QUARANTINE_FILE)
             except Exception as e:
                 print(f"Error saving quarantine: {e}", flush=True)
 
@@ -792,8 +794,11 @@ class ParamSanitizer(CustomLogger):
 
             for p in [LAST_MODEL_FILE, "/app/state/litellm_last_model.txt"]:
                 try:
-                    with open(p, "w") as f:
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                    tmp_p = f"{p}.tmp.{os.getpid()}"
+                    with open(tmp_p, "w") as f:
                         f.write(f"{model}|{now}")
+                    os.replace(tmp_p, p)
                 except Exception:
                     pass
 
@@ -818,10 +823,21 @@ class ParamSanitizer(CustomLogger):
 
             for p in [LAST_MODEL_FILE, "/app/state/litellm_last_model.txt"]:
                 try:
-                    with open(p, "w") as f:
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                    tmp_p = f"{p}.tmp.{os.getpid()}"
+                    with open(tmp_p, "w") as f:
                         f.write(f"{model}|{now}|{duration}ms")
+                    os.replace(tmp_p, p)
                 except Exception:
                     pass
+
+            # Multi-session rolling completion log (persisted in /app/state)
+            try:
+                hist_p = "/app/state/recent_completions.log"
+                with open(hist_p, "a") as f:
+                    f.write(f"{now}|{model}|{duration}ms\n")
+            except Exception:
+                pass
         except Exception:
             pass
 

@@ -42,7 +42,8 @@ cmd_status() {
   if [ "$is_healthy" = true ]; then
     echo -e "  ✓ \033[1;32mRouter Active & Ready\033[0m (http://127.0.0.1:5111)"
     echo -e "    Default OpenCode model: \033[1;36mauto-free/free-coder\033[0m"
-    echo -e "    Routing Strategy: \033[1;32mlatency-based-routing + automatic 429 cooldown & fallback\033[0m"
+    echo -e "    Routing Strategy: \033[1;32mleast-busy (Multi-Session Parallel Distribution) + 3 Priority Tiers\033[0m"
+    echo -e "    Multi-Session Support:  \033[1;32mActive\033[0m (Simultaneous sessions automatically balance across providers)"
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^free-llm-router$"; then
       echo -e "    Container: \033[1;36mfree-llm-router (running, restart: unless-stopped)\033[0m"
     fi
@@ -241,7 +242,7 @@ cmd_router() {
 
 cmd_last() {
   local last_info
-  last_info=$(docker exec free-llm-router cat /tmp/litellm_last_model.txt 2>/dev/null || true)
+  last_info=$(docker exec free-llm-router cat /app/state/litellm_last_model.txt 2>/dev/null || docker exec free-llm-router cat /tmp/litellm_last_model.txt 2>/dev/null || true)
   if [ -n "$last_info" ]; then
     local model=$(echo "$last_info" | cut -d'|' -f1)
     local time=$(echo "$last_info" | cut -d'|' -f2)
@@ -249,6 +250,17 @@ cmd_last() {
     echo -e "🤖 \033[1;33mLast Routed Model:\033[0m \033[1;32m$model\033[0m"
     echo -e "   Response Latency: \033[1;36m$latency\033[0m"
     echo -e "   Completed At:     \033[1;36m$time\033[0m"
+
+    local recent_logs
+    recent_logs=$(docker exec free-llm-router tail -n 8 /app/state/recent_completions.log 2>/dev/null || true)
+    if [ -n "$recent_logs" ]; then
+      echo ""
+      echo -e "⚡ \033[1;33mRecent Parallel Activity (Multi-Session In-Flight History):\033[0m"
+      while IFS='|' read -r r_time r_model r_lat; do
+        [ -z "$r_model" ] && continue
+        printf "   • %-8s \033[1;36m%-40s\033[0m \033[2m(%s)\033[0m\n" "$r_time" "$r_model" "$r_lat"
+      done <<< "$recent_logs"
+    fi
   else
     echo "No requests routed yet since container start."
   fi
@@ -330,6 +342,11 @@ case "${1:-status}" in
     else
       exec opencode "$@"
     fi
+    ;;
+  standalone)
+    shift
+    echo -e "\033[1;36m🚀 Starting OpenCode in isolated --standalone mode (private daemon session)...\033[0m"
+    exec opencode --standalone "$@"
     ;;
   help|--help|-h)
     cmd_status
