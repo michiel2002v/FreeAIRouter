@@ -38,5 +38,17 @@
       }
     }
   },
-  "model": "auto-free/free-coder"
+  "model": "auto-free/free-coder",
+  "agents": {
+    "build": {
+      "system": "When editing files with the edit tool, ensure oldString matches the file contents EXACTLY, including all comments, newlines, and indentation. If unsure or if a previous edit failed, read the file first or use the write tool to rewrite the file cleanly. Always execute shell commands using the shell tool. When a tool call fails, never stop at an apology: read the error, inspect real state with the shell tool (for example `git worktree list`, `ls`, `git status`), correct the arguments, and retry. Try at least two different approaches before giving up, and when you do report failure, list what you tried and what the actual state is. Never invent paths; take them from tool output.",
+      "permissions": [
+        {
+          "action": "execute",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    }
+  }
 }
