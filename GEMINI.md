@@ -8,7 +8,7 @@
 
 ## 1. System Architecture
 
-This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 16 vetted free-tier LLM deployments with `least-busy` concurrency-aware load balancing, 3 hierarchical priority tiers, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and in-flight context window compaction.
+This repository hosts a multi-provider, zero-cost AI coding hub. OpenCode connects to a locally managed LiteLLM proxy running in Docker Compose on port `5111`. The proxy orchestrates 6 strong free-tier LLM deployments with `least-busy` concurrency-aware load balancing, 3 hierarchical priority tiers, automated 429 rate-limit cooldowns, dead-model auto-quarantine, output token clamping, and in-flight context window compaction.
 
 ```mermaid
 flowchart TD
@@ -236,3 +236,9 @@ JetBrains Junie (`~/.local/bin/junie`) connects directly to the FreeAIRouter Lit
 3. **Verify After Changes**: After updating router configuration or Python hooks, execute `free-ai router restart` followed by a live test completion.
 4. **Preserve Clamping & Compaction**: Maintain the pre-call deployment hooks in [`clean_request.py`](file:///home/michiel/.config/litellm/clean_request.py) so downstream coding tools never trigger 400 token overflows or context blowups.
 5. **Always Commit & Push to GitHub**: Whenever you make fixes, enhancements, or configuration updates in this workspace, always commit your changes with a clear message and push them to GitHub (`git push origin main`) so the remote repository is always up to date.
+
+---
+
+## 12. Pool Pruning (agentic quality)
+
+The `free-coder` pool (shared by OpenCode and Junie) contains only models that handle agentic tool use and exact-match edits reliably: Codestral, Gemini 3.8 Flash, GPT-OSS 120B, Nemotron 3 Ultra 550B (tier 1), DeepSeek V4 Flash (tier 2), Gemini 3.5 Flash (tier 3). Removed from the pool (still selectable directly by model name): Llama 3.3 70B, Command R+ 2024, Qwen 27B, North Mini Code, Nemotron Lightning, Gemini 3.5 Flash Lite, Kilo, Aion, GLM 4.7 Flash, Pennytree — they hallucinated edit patterns and tool calls. The roster table in section 2 lists the original 16; only the six above are in the pool.
