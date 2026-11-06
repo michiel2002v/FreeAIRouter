@@ -207,6 +207,7 @@ JetBrains Junie (`~/.local/bin/junie`) connects directly to the FreeAIRouter Lit
      - If the client registered `bash` and not `shell` (Junie), any hallucinated or mismatched tool calls (`shell`, `execute`, `sh`, `terminal`, `run_command`) normalize to `bash`.
      - If the client registered `shell` (OpenCode), tool calls normalize to `shell`.
    - Tool arguments remain standard (`{"command": "..."}`), enabling both Junie and OpenCode to operate concurrently without conflicts.
+4. **Response Repair (Junie strict parsing)**: `async_post_call_success_hook` repairs malformed tool calls (empty `tool_calls`, missing IDs, invalid-JSON arguments, mismatched `finish_reason`, empty content), and the streaming hook strips non-standard chunk fields (`stop_reason`) and fills missing `type`/`index`, so Junie never reports "unexpected response format".
 
 ---
 

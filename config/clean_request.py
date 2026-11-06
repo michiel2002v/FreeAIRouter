@@ -24,6 +24,7 @@ LiteLLM proxy custom callback to:
 """
 
 import json
+import uuid
 import os
 import re
 import time
@@ -812,6 +813,23 @@ class ParamSanitizer(CustomLogger):
                 response_chunk.model = f"free-coder [{clean}]"
         except Exception:
             pass
+        try:
+            # Strip non-standard fields and fill required ones so strict SDK clients (Junie) can parse every chunk
+            for ch in getattr(response_chunk, "choices", None) or []:
+                for extra in ("stop_reason", "matched_stop"):
+                    if hasattr(ch, extra):
+                        try:
+                            delattr(ch, extra)
+                        except Exception:
+                            pass
+                delta = getattr(ch, "delta", None)
+                for tc in (getattr(delta, "tool_calls", None) or []):
+                    if getattr(tc, "type", None) is None:
+                        tc.type = "function"
+                    if getattr(tc, "index", None) is None:
+                        tc.index = 0
+        except Exception:
+            pass
         return response_chunk
 
     async def async_post_call_success_hook(
@@ -884,6 +902,43 @@ class ParamSanitizer(CustomLogger):
                                         if cmd and is_shell_command(str(cmd)):
                                             fn.name = target_tool
                                             fn.arguments = json.dumps({"command": str(cmd)})
+
+            # 5. Repair malformed tool calls so strict clients never see an unparsable response
+            for choice in choices:
+                m = getattr(choice, "message", None)
+                if not m:
+                    continue
+                tcs = getattr(m, "tool_calls", None)
+                if tcs is not None and len(tcs) == 0:
+                    m.tool_calls = None
+                    tcs = None
+                if tcs:
+                    for i, tc in enumerate(tcs):
+                        if not getattr(tc, "id", None):
+                            tc.id = f"call_{uuid.uuid4().hex[:12]}"
+                        fn = getattr(tc, "function", None)
+                        if fn is None:
+                            continue
+                        raw = getattr(fn, "arguments", None)
+                        if isinstance(raw, dict):
+                            fn.arguments = json.dumps(raw)
+                        elif not isinstance(raw, str) or not raw.strip():
+                            fn.arguments = "{}"
+                        else:
+                            try:
+                                json.loads(raw)
+                            except Exception:
+                                print(f"⚠️ [ROUTER] Invalid tool args from model for '{getattr(fn, 'name', '?')}': {raw[:200]!r}", flush=True)
+                                try:
+                                    fn.arguments = json.dumps(json.loads(raw, strict=False))
+                                except Exception:
+                                    fn.arguments = "{}"
+                    if getattr(choice, "finish_reason", None) not in ("tool_calls", "stop", "length"):
+                        choice.finish_reason = "tool_calls"
+                elif getattr(choice, "finish_reason", None) == "tool_calls":
+                    choice.finish_reason = "stop"
+                if not getattr(m, "tool_calls", None) and not (getattr(m, "content", None) or "").strip():
+                    m.content = getattr(m, "reasoning_content", None) or "Done."
 
             hidden = getattr(response, "_hidden_params", {}) or {}
             model = hidden.get("litellm_model_name") or hidden.get("provider_response_model") or data.get("model")
