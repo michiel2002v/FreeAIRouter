@@ -74,6 +74,19 @@ model_list:
   # 14. Aion Labs - 128K context reasoning
   # 15. Zhipu AI (Z AI) - GLM-4.7-Flash reasoning
   # 16. Requesty - Pennytree free reasoning model
+  # Cloudflare Workers AI Llama 3.3 70B - last-resort tier 3 fallback only
+  - model_name: free-coder
+    litellm_params:
+      model: openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+      api_base: https://api.cloudflare.com/client/v4/accounts/d3f4b0ac47a42b21b1b9b9c8b692ceab/ai/v1
+      api_key: os.environ/CF_API_TOKEN
+      order: 3
+      rpm: 100
+      max_parallel_requests: 4
+    model_info:
+      max_output_tokens: 8192
+      max_input_tokens: 128000
+
   # --------------------------------------------------------------------------
   # 2. Direct Target Deployments (Exposed for manual selection in OpenCode TUI)
   # --------------------------------------------------------------------------
