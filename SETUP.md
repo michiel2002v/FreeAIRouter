@@ -77,7 +77,7 @@ fi
 
 This script:
 1. Sources `~/notepad/free-llms/.env` cleanly.
-2. Standardizes SDK aliases (`GOOGLE_API_KEY`, `CF_API_TOKEN`, `AION_API_KEY`).
+2. Standardizes SDK aliases (`GOOGLE_API_KEY`, `CF_API_KEY`, `AION_API_KEY`).
 3. Exports `AUTO_FREE_API_KEY="sk-free-llm"` for the local LiteLLM proxy.
 4. Ensures `~/.opencode/bin` and `~/.local/bin` are present in `PATH`.
 
@@ -157,7 +157,7 @@ services:
       - GONKA_API_KEY
       - AION_API_KEY
       - REQUESTY_API_KEY
-      - CF_API_TOKEN
+      - CF_API_KEY
       - CF_ACCOUNT_ID
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     healthcheck:

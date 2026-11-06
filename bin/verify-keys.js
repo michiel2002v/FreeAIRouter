@@ -326,7 +326,7 @@ async function testRequesty() {
 }
 
 async function testCloudflare() {
-  const key = process.env.CLOUDFLARE_API_KEY || process.env.CF_API_TOKEN;
+  const key = process.env.CLOUDFLARE_API_KEY || process.env.CF_API_KEY;
   const accountId = process.env.CF_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!key) return { status: 'SKIPPED', msg: 'Key not set' };
   if (!accountId) return { status: 'SKIPPED', msg: 'CF_ACCOUNT_ID not found in .env (required by Cloudflare)' };

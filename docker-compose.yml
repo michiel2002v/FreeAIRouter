@@ -24,7 +24,7 @@ services:
       - GONKA_API_KEY
       - AION_API_KEY
       - REQUESTY_API_KEY
-      - CF_API_TOKEN
+      - CF_API_KEY
       - CF_ACCOUNT_ID
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     healthcheck:

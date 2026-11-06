@@ -59,6 +59,161 @@ model_list:
       rpm: 30
       max_parallel_requests: 2
 
+  # --- Re-added after live tool-call probe (2026-11-06): all returned tool_calls ---
+  # NVIDIA NIM direct Nemotron 3 Ultra 550B - 40 RPM / 10K RPD, biggest free quota
+  - model_name: free-coder
+    litellm_params:
+      model: openai/nvidia/nemotron-3-ultra-550b-a55b
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+      order: 1
+      rpm: 40
+      max_parallel_requests: 3
+    model_info:
+      max_input_tokens: 1000000
+
+  # Kilo Nemotron 3 Ultra 550B (separate 200 req/hr quota, same model)
+  - model_name: free-coder
+    litellm_params:
+      model: openai/nvidia/nemotron-3-ultra-550b-a55b:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_API_KEY
+      order: 1
+      rpm: 40
+      max_parallel_requests: 2
+    model_info:
+      max_input_tokens: 1000000
+
+  # Gemini 3.6 Flash - sibling of 3.8 (which 503s under load)
+  - model_name: free-coder
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/GEMINI_API_KEY
+      order: 1
+      rpm: 15
+      max_parallel_requests: 3
+
+  # Tier 2 additions
+  - model_name: free-coder
+    litellm_params:
+      model: groq/qwen/qwen3.8-27b
+      api_key: os.environ/GROQ_API_KEY
+      order: 2
+      rpm: 30
+      max_parallel_requests: 1
+    model_info:
+      max_output_tokens: 16384
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/cohere/north-mini-code:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_API_KEY
+      order: 2
+      rpm: 40
+      max_parallel_requests: 2
+    model_info:
+      max_output_tokens: 8192
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/reflection/beam-free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_API_KEY
+      order: 2
+      rpm: 40
+      max_parallel_requests: 2
+    model_info:
+      max_input_tokens: 1000000
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/MiniMaxAI/MiniMax-M2.7
+      api_base: https://proxy.gonkabroker.com/v1
+      api_key: os.environ/GONKA_API_KEY
+      order: 2
+      rpm: 6
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/command-a-plus-05-2026
+      api_base: https://api.cohere.com/compatibility/v1
+      api_key: os.environ/COHERE_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 2
+    model_info:
+      max_output_tokens: 8192
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/@cf/openai/gpt-oss-120b
+      api_base: https://api.cloudflare.com/client/v4/accounts/d3f4b0ac47a42b21b1b9b9c8b692ceab/ai/v1
+      api_key: os.environ/CF_API_KEY
+      order: 2
+      rpm: 60
+      max_parallel_requests: 2
+
+
+  # Tier 2: Mistral/Gonka/Groq (429s seen in probe were daily/minute quota, models are fine)
+  - model_name: free-coder
+    litellm_params:
+      model: mistral/mistral-medium-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      order: 2
+      rpm: 30
+      max_parallel_requests: 2
+
+  - model_name: free-coder
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      order: 2
+      rpm: 30
+      max_parallel_requests: 2
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/zai-org/GLM-5.3-Flash
+      api_base: https://proxy.gonkabroker.com/v1
+      api_key: os.environ/GONKA_API_KEY
+      order: 2
+      rpm: 6
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_API_KEY
+      order: 2
+      rpm: 30
+      max_parallel_requests: 2
+
+  # Requesty free models (org limit: low concurrency -> max_parallel_requests 1 each)
+  - model_name: free-coder
+    litellm_params:
+      model: openai/nvidia/nemotron-3-ultra-550b-a55b
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 1
+    model_info:
+      max_input_tokens: 1000000
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/nvidia/nemotron-3.5-lightning-30b-a3b
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 2
+      rpm: 20
+      max_parallel_requests: 1
+    model_info:
+      max_input_tokens: 1000000
+
+
   # --- TIER 3: Resilient High-Availability Fallbacks (order: 3) ---
   # 11. Google Gemini 3.5 Flash - Secondary frontier fallback (1M context)
   - model_name: free-coder
@@ -79,13 +234,107 @@ model_list:
     litellm_params:
       model: openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
       api_base: https://api.cloudflare.com/client/v4/accounts/d3f4b0ac47a42b21b1b9b9c8b692ceab/ai/v1
-      api_key: os.environ/CF_API_TOKEN
+      api_key: os.environ/CF_API_KEY
       order: 3
       rpm: 100
       max_parallel_requests: 4
     model_info:
       max_output_tokens: 8192
       max_input_tokens: 128000
+
+  # Tier 3 additions
+  - model_name: free-coder
+    litellm_params:
+      model: openai/glm-4.7-flash
+      api_base: https://open.bigmodel.cn/api/paas/v4
+      api_key: os.environ/ZAI_API_KEY
+      order: 3
+      rpm: 30
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/command-a-03-2025
+      api_base: https://api.cohere.com/compatibility/v1
+      api_key: os.environ/COHERE_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 2
+    model_info:
+      max_output_tokens: 8192
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/kilo-auto/free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_API_KEY
+      order: 3
+      rpm: 40
+      max_parallel_requests: 2
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/@cf/meta/llama-4-scout-17b-16e-instruct
+      api_base: https://api.cloudflare.com/client/v4/accounts/d3f4b0ac47a42b21b1b9b9c8b692ceab/ai/v1
+      api_key: os.environ/CF_API_KEY
+      order: 3
+      rpm: 60
+      max_parallel_requests: 2
+
+  # Tier 3: slower or smaller
+  - model_name: free-coder
+    litellm_params:
+      model: openai/google/gemma-4-31b-it
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+      order: 3
+      rpm: 30
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/openai/gpt-oss-20b
+      api_base: https://integrate.api.nvidia.com/v1
+      api_key: os.environ/NVIDIA_API_KEY
+      order: 3
+      rpm: 30
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/google/gemma-4-31b-it
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/novita/ling-3.1-flash
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/mistral/leanstral-1-5
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 1
+
+  - model_name: free-coder
+    litellm_params:
+      model: openai/nvidia/muse-glimmer-30b
+      api_base: https://router.requesty.ai/v1
+      api_key: os.environ/REQUESTY_API_KEY
+      order: 3
+      rpm: 20
+      max_parallel_requests: 1
 
   # --------------------------------------------------------------------------
   # 2. Direct Target Deployments (Exposed for manual selection in OpenCode TUI)

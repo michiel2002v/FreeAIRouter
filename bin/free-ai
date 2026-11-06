@@ -88,7 +88,7 @@ cmd_status() {
     check_p "ZAI_API_KEY" "Zhipu AI (Z AI)" "GLM-4.7-Flash series"
     check_p "REQUESTY_API_KEY" "Requesty" "Pennytree free reasoning"
     check_p "OPENROUTER_API_KEY" "OpenRouter" "Cohere North Mini Code & dynamic free router"
-    check_p "CF_API_TOKEN" "Cloudflare Workers AI" "Llama 3.3 (requires CF_ACCOUNT_ID)"
+    check_p "CF_API_KEY" "Cloudflare Workers AI" "Llama 3.3 (requires CF_ACCOUNT_ID)"
   else
     echo -e "\033[1;33mShared Free-Tier Failover Engine:\033[0m"
     echo -e "  ✓ \033[1;32m18 High-Performance Models Configured\033[0m in LiteLLM Router Pool"
